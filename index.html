@@ -18,6 +18,10 @@
 <!-- Ícone SVG embutido via data URI para Apple Touch Icon -->
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%230a0a0f'/%3E%3Ccircle cx='256' cy='240' r='130' fill='none' stroke='%23f0b429' stroke-width='24'/%3E%3Cline x1='256' y1='240' x2='256' y2='148' stroke='%23f0b429' stroke-width='20' stroke-linecap='round'/%3E%3Cline x1='256' y1='240' x2='318' y2='290' stroke='%23f0b429' stroke-width='16' stroke-linecap='round'/%3E%3Ccircle cx='256' cy='240' r='10' fill='%23f0b429'/%3E%3Crect x='136' y='390' width='240' height='36' rx='18' fill='%23f0b429'/%3E%3C/svg%3E">
 
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -479,22 +483,32 @@
     font-family: 'DM Sans', sans-serif;
   }
   .admin-body { padding: 20px; flex: 1; }
-  .admin-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+  .admin-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
+    margin-bottom: 24px;
+  }
   .admin-tab {
-    flex: 1;
     padding: 10px 4px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 11px;
     font-family: 'Syne', sans-serif;
     font-weight: 600;
     cursor: pointer;
     text-align: center;
-    letter-spacing: .5px;
+    letter-spacing: .3px;
     text-transform: uppercase;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    line-height: 1.2;
   }
+  .admin-tab .tab-icon { font-size: 16px; }
   .admin-tab.active { background: var(--accent); border-color: var(--accent); color: var(--bg); }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
@@ -1105,12 +1119,12 @@
   <div class="admin-body">
 
     <div class="admin-tabs">
-      <div class="admin-tab active" onclick="switchTab('tab-relatorio', this)">Relatório</div>
-      <div class="admin-tab" onclick="switchTab('tab-manual', this)">Manual</div>
-      <div class="admin-tab" onclick="switchTab('tab-funcionarios', this)">Equipe</div>
-      <div class="admin-tab" onclick="switchTab('tab-sms', this)">WhatsApp</div>
-      <div class="admin-tab" onclick="switchTab('tab-atrasos', this)">Atrasos</div>
-      <div class="admin-tab" onclick="switchTab('tab-config', this)">Config</div>
+      <div class="admin-tab active" onclick="switchTab('tab-relatorio', this)"><span class="tab-icon">📊</span>Relatório</div>
+      <div class="admin-tab" onclick="switchTab('tab-manual', this)"><span class="tab-icon">✏️</span>Manual</div>
+      <div class="admin-tab" onclick="switchTab('tab-funcionarios', this)"><span class="tab-icon">👥</span>Equipe</div>
+      <div class="admin-tab" onclick="switchTab('tab-sms', this)"><span class="tab-icon">💬</span>WhatsApp</div>
+      <div class="admin-tab" onclick="switchTab('tab-atrasos', this)"><span class="tab-icon">⏰</span>Atrasos</div>
+      <div class="admin-tab" onclick="switchTab('tab-config', this)"><span class="tab-icon">⚙️</span>Config</div>
     </div>
 
     <!-- TAB: RELATÓRIO -->
@@ -1240,6 +1254,33 @@
   </div>
 </div>
 
+<!-- Loading Overlay -->
+<div id="loading-overlay" style="
+  display:flex; position:fixed; inset:0; z-index:2000;
+  background:var(--bg); flex-direction:column;
+  align-items:center; justify-content:center; gap:20px;">
+  <div style="font-size:48px; animation:spin 1.2s linear infinite">⚙️</div>
+  <div class="loading-msg" style="font-family:'Syne',sans-serif;font-size:16px;color:var(--accent)">Carregando...</div>
+  <div style="font-size:12px;color:var(--muted)">Sincronizando com a nuvem</div>
+</div>
+<style>
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.sync-dot {
+  width:8px;height:8px;border-radius:50%;
+  background:var(--green);
+  position:fixed;top:12px;right:12px;z-index:100;
+  animation:pulse-sync 2s infinite;
+}
+.sync-dot.offline { background:var(--red); animation:none; }
+@keyframes pulse-sync {
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.5;transform:scale(.8)}
+}
+</style>
+
+<!-- Sync indicator -->
+<div class="sync-dot" id="sync-dot" title="Online — dados sincronizados"></div>
+
 <!-- PWA Install Banner -->
 <div id="pwa-banner">
   <div class="pwa-banner-icon">📋</div>
@@ -1268,30 +1309,99 @@ const PUNCH_STEPS = [
   { key: 'saida_final', label: 'Saída Final',     shortLabel: 'S. Final',  btnLabel: 'REGISTRAR SAÍDA FINAL',      btnSub: 'Encerramento do expediente', icon: '🔴', btnClass: 'btn-s-final' },
 ];
 
-function loadData() {
-  const d = JSON.parse(localStorage.getItem('pontoData') || JSON.stringify({
-    password: DEFAULT_PASS,
-    employees: [
-      { id: 1, name: 'Maria Silva', color: COLORS[0], pin: '', escala: '6x1', horasDia: 6 },
-      { id: 2, name: 'João Santos', color: COLORS[1], pin: '', escala: '6x1', horasDia: 6 }
-    ],
-    records: [],
-    sms: { provider: '', dest: '', sid: '', token: '', apiKey: '', apiSecret: '', webhookUrl: '', enabled: false },
-    smsLog: [],
-    lateConfig: {},   // { empId: 'HH:MM' }
-    lateLog: []
-  }));
-  // Migrate existing employees to have schedule fields
-  if (d.employees) {
-    d.employees = d.employees.map(e => ({
-      escala: '6x1', horasDia: 6, ...e
-    }));
+// ══════════════════════════════════════════
+// FIREBASE CONFIG + INIT
+// ══════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyC0FCpFDhm9rJTxGUQoNRKOQEt17JI_V9o",
+  authDomain: "ponto-mado.firebaseapp.com",
+  projectId: "ponto-mado",
+  storageBucket: "ponto-mado.firebasestorage.app",
+  messagingSenderId: "555567046867",
+  appId: "1:555567046867:web:e20efb45ab804b30cb3426"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const DOC_REF = db.collection('ponto').doc('dados');
+
+// Cache local (fallback offline + performance)
+let _cache = null;
+
+const DEFAULT_DATA = {
+  password: '1234',
+  employees: [],
+  records: [],
+  sms: { provider: '', dest: '', waApiKey: '', enabled: false },
+  smsLog: [],
+  lateConfig: {},
+  lateLog: []
+};
+
+// Carrega do Firestore (com fallback localStorage)
+async function loadDataAsync() {
+  // Timeout de 5s — se Firebase demorar, usa localStorage e segue
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('timeout')), 5000)
+  );
+  try {
+    const snap = await Promise.race([DOC_REF.get(), timeout]);
+    if (snap.exists) {
+      _cache = migrateData(snap.data());
+    } else {
+      const local = localStorage.getItem('pontoData');
+      _cache = local ? migrateData(JSON.parse(local)) : { ...DEFAULT_DATA };
+      // Sobe dados locais para nuvem sem bloquear
+      DOC_REF.set(_cache).catch(() => {});
+    }
+  } catch(e) {
+    console.warn('Firebase indisponível, usando localStorage:', e.message);
+    const local = localStorage.getItem('pontoData');
+    _cache = local ? migrateData(JSON.parse(local)) : { ...DEFAULT_DATA };
   }
+  return _cache;
+}
+
+// Salva no Firestore + localStorage (redundância offline)
+async function saveDataAsync(d) {
+  _cache = d;
+  localStorage.setItem('pontoData', JSON.stringify(d)); // backup local sempre
+  try {
+    await DOC_REF.set(d);
+  } catch(e) {
+    console.warn('Firebase save falhou (offline?), salvo só localmente:', e.message);
+  }
+}
+
+// Funções síncronas (usadas pelo código existente) — operam no cache
+function loadData() {
+  if (!_cache) {
+    // Fallback síncrono (só no boot antes do init)
+    const local = localStorage.getItem('pontoData');
+    _cache = local ? migrateData(JSON.parse(local)) : { ...DEFAULT_DATA };
+  }
+  return _cache;
+}
+
+function saveData(d) {
+  _cache = d;
+  localStorage.setItem('pontoData', JSON.stringify(d));
+  // Fire-and-forget para o Firestore
+  DOC_REF.set(d).catch(e => console.warn('Firebase sync:', e.message));
+}
+
+function migrateData(d) {
+  if (!d) return { ...DEFAULT_DATA };
+  if (!d.employees) d.employees = [];
+  if (!d.records) d.records = [];
+  if (!d.sms) d.sms = { provider: '', dest: '', waApiKey: '', enabled: false };
+  if (!d.smsLog) d.smsLog = [];
   if (!d.lateConfig) d.lateConfig = {};
   if (!d.lateLog) d.lateLog = [];
+  // Migra funcionários antigos para ter campos de escala
+  d.employees = d.employees.map(e => ({ escala: '6x1', horasDia: 6, ...e }));
   return d;
 }
-function saveData(d) { localStorage.setItem('pontoData', JSON.stringify(d)); }
 
 let data = loadData();
 let currentEmpId = null;
@@ -1876,8 +1986,12 @@ function renderScheduleList() {
   data.employees.forEach(emp => {
     const escala = emp.escala || '6x1';
     const horasDia = emp.horasDia || 6;
+    const diasTipo = emp.diasTipo || 'impares'; // 'impares' ou 'pares' para 12x36
     const badgeClass = escala === '12x36' ? 's12x36' : 's6x1';
-    const badgeLabel = escala === '12x36' ? '12x36' : escala === '6x1' ? '6x1' : 'Custom';
+    const badgeLabel = escala === '12x36'
+      ? `12x36 · ${diasTipo === 'impares' ? 'Ímpares' : 'Pares'}`
+      : escala === '6x1' ? '6x1' : 'Custom';
+
     const div = document.createElement('div');
     div.className = 'schedule-row';
     div.innerHTML = `
@@ -1896,8 +2010,22 @@ function renderScheduleList() {
           value="${horasDia}" min="1" max="12" step="0.5"
           style="${escala==='12x36'?'opacity:.4;pointer-events:none':''}"
           placeholder="h/dia">
-        <span style="font-size:12px;color:var(--muted)">h/dia</span>
+        <span style="font-size:12px;color:var(--muted)">${escala==='12x36'?'':'h/dia'}</span>
         <button class="schedule-save-btn" onclick="saveSchedule(${emp.id})">✓ Salvar</button>
+      </div>
+      <!-- Opção pares/ímpares — só aparece para 12x36 -->
+      <div id="dias-tipo-row-${emp.id}" style="margin-top:10px;${escala!=='12x36'?'display:none':''}">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:1px;text-transform:uppercase">Dias de trabalho (para alertas de atraso)</div>
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;background:${diasTipo==='impares'?'rgba(240,180,41,.2)':'var(--surface2)'};border:1px solid ${diasTipo==='impares'?'var(--accent)':'var(--border)'};border-radius:10px;padding:10px;text-align:center;cursor:pointer;font-size:13px;font-family:'Syne',sans-serif;font-weight:600">
+            <input type="radio" name="dt-${emp.id}" id="dt-imp-${emp.id}" value="impares" ${diasTipo==='impares'?'checked':''} style="display:none" onchange="renderScheduleList()">
+            📅 Ímpares<br><span style="font-size:10px;color:var(--muted);font-family:'DM Sans',sans-serif">1,3,5,7...</span>
+          </label>
+          <label style="flex:1;background:${diasTipo==='pares'?'rgba(240,180,41,.2)':'var(--surface2)'};border:1px solid ${diasTipo==='pares'?'var(--accent)':'var(--border)'};border-radius:10px;padding:10px;text-align:center;cursor:pointer;font-size:13px;font-family:'Syne',sans-serif;font-weight:600">
+            <input type="radio" name="dt-${emp.id}" id="dt-par-${emp.id}" value="pares" ${diasTipo==='pares'?'checked':''} style="display:none" onchange="renderScheduleList()">
+            📅 Pares<br><span style="font-size:10px;color:var(--muted);font-family:'DM Sans',sans-serif">2,4,6,8...</span>
+          </label>
+        </div>
       </div>`;
     list.appendChild(div);
   });
@@ -1906,28 +2034,46 @@ function renderScheduleList() {
 function onEscalaChange(empId) {
   const sel = document.getElementById('esc-'+empId);
   const hdInput = document.getElementById('hd-'+empId);
+  const diasRow = document.getElementById('dias-tipo-row-'+empId);
   if (sel.value === '12x36') {
     hdInput.value = 12;
     hdInput.style.opacity = '.4';
     hdInput.style.pointerEvents = 'none';
+    if (diasRow) diasRow.style.display = 'block';
   } else {
     hdInput.style.opacity = '1';
     hdInput.style.pointerEvents = 'auto';
     if (sel.value === '6x1') hdInput.value = 6;
+    if (diasRow) diasRow.style.display = 'none';
   }
 }
 
 function saveSchedule(empId) {
   const escala = document.getElementById('esc-'+empId).value;
   const horasDia = parseFloat(document.getElementById('hd-'+empId).value) || 6;
+  // Lê pares/ímpares só se 12x36
+  let diasTipo = 'impares';
+  if (escala === '12x36') {
+    const radios = document.querySelectorAll(`input[name="dt-${empId}"]`);
+    radios.forEach(r => { if (r.checked) diasTipo = r.value; });
+  }
   data = loadData();
   data.employees = data.employees.map(e =>
-    e.id === empId ? { ...e, escala, horasDia } : e
+    e.id === empId ? { ...e, escala, horasDia, diasTipo } : e
   );
   saveData(data);
   renderScheduleList();
   renderReport();
   showToast('✅ Jornada salva!');
+}
+
+// Verifica se hoje é dia de trabalho para funcionário 12x36
+function isDiaDeTrabalho(emp) {
+  if ((emp.escala || '6x1') !== '12x36') return true; // 6x1 e custom: sempre verifica
+  const diaDoMes = new Date().getDate(); // 1-31
+  const diasTipo = emp.diasTipo || 'impares';
+  const ehImpar = diaDoMes % 2 !== 0;
+  return diasTipo === 'impares' ? ehImpar : !ehImpar;
 }
 
 function addEmployee() {
@@ -2187,13 +2333,18 @@ function renderLateConfig() {
   list.innerHTML = '';
   data.employees.forEach(emp => {
     const savedTime = data.lateConfig[emp.id] || '';
+    const diaOk = isDiaDeTrabalho(emp);
+    const diaInfo = (emp.escala === '12x36')
+      ? `<span style="font-size:10px;margin-left:4px;color:${diaOk?'var(--green)':'var(--muted)'}">${diaOk?'✅ trabalha hoje':'💤 folga hoje'}</span>`
+      : '';
     const row = document.createElement('div');
     row.className = 'late-emp-row';
     row.innerHTML = `
       <div class="emp-avatar" style="background:${emp.color}22;color:${emp.color};width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-weight:700;font-size:12px;flex-shrink:0">${empInitials(emp.name)}</div>
-      <div class="late-emp-name">${emp.name}</div>
+      <div class="late-emp-name"><span>${emp.name}</span>${diaInfo}</div>
       <input type="time" class="late-time-input" id="late-${emp.id}" value="${savedTime}" placeholder="--:--">`;
     list.appendChild(row);
+  });
   });
   renderLateLog();
 }
@@ -2218,6 +2369,9 @@ async function checkLateNow() {
   let notified = 0;
 
   for (const emp of data.employees) {
+    // 12x36: só alerta se hoje é dia de trabalho (pares ou ímpares)
+    if (!isDiaDeTrabalho(emp)) continue;
+
     const limiteStr = data.lateConfig[emp.id];
     if (!limiteStr) continue;
     const limiteMin = t2min(limiteStr);
@@ -2293,6 +2447,27 @@ function renderLateLog() {
     `<div class="log-line fail">${l.ts} — ${l.emp} — ${l.tipo === 'atraso' ? '⚠️ Atraso' : '⏱️ Saída antecipada'} — ${l.date}</div>`
   ).join('');
 }
+
+// ══════════════════════════════════════════
+// MONITOR ONLINE/OFFLINE
+// ══════════════════════════════════════════
+function updateSyncDot() {
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  if (navigator.onLine) {
+    dot.className = 'sync-dot';
+    dot.title = 'Online — dados sincronizados com a nuvem';
+    // Tenta re-sync quando volta online
+    const d = loadData();
+    DOC_REF.set(d).catch(() => {});
+  } else {
+    dot.className = 'sync-dot offline';
+    dot.title = 'Offline — dados salvos localmente';
+  }
+}
+window.addEventListener('online', updateSyncDot);
+window.addEventListener('offline', updateSyncDot);
+setTimeout(updateSyncDot, 2000);
 
 // ══════════════════════════════════════════
 // PWA — SERVICE WORKER + MANIFEST + INSTALL
@@ -2405,9 +2580,43 @@ function dismissPwa() {
 }
 
 // ══════════════════════════════════════════
-// INIT
+// INIT — carrega Firebase antes de renderizar
 // ══════════════════════════════════════════
-renderHome();
+
+// Tela de loading enquanto carrega do Firebase
+function showLoading(msg) {
+  const el = document.getElementById('loading-overlay');
+  if (el) { el.querySelector('.loading-msg').textContent = msg || 'Carregando...'; el.style.display = 'flex'; }
+}
+function hideLoading() {
+  const el = document.getElementById('loading-overlay');
+  if (el) el.style.display = 'none';
+}
+
+(async () => {
+  // Garante que o app sempre inicia, mesmo se Firebase falhar
+  const safeStart = () => {
+    hideLoading();
+    data = loadData();
+    renderHome();
+  };
+
+  // Timeout absoluto de 6s — nunca trava na tela de loading
+  const bailout = setTimeout(() => {
+    console.warn('Init timeout — iniciando com dados locais');
+    safeStart();
+  }, 6000);
+
+  showLoading('Conectando ao banco de dados...');
+  try {
+    await loadDataAsync();
+  } catch(e) {
+    console.warn('Init error:', e);
+  } finally {
+    clearTimeout(bailout);
+    safeStart();
+  }
+})();
 </script>
 </body>
 </html>
